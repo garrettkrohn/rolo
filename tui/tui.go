@@ -21,6 +21,7 @@ type model struct {
 	cursor     int
 	mode       mode
 	onSave     func([]storage.SessionData) error
+	wrapAround bool
 }
 
 func (m model) Init() tea.Cmd {
@@ -111,6 +112,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Move cursor down
 				if m.cursor < len(m.sessions)-1 {
 					m.cursor++
+				} else if m.wrapAround && len(m.sessions) > 0 {
+					m.cursor = 0
 				}
 			} else {
 				// Move item down
@@ -126,6 +129,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Move cursor up
 				if m.cursor > 0 {
 					m.cursor--
+				} else if m.wrapAround && len(m.sessions) > 0 {
+					m.cursor = len(m.sessions) - 1
 				}
 			} else {
 				// Move item up
@@ -182,11 +187,19 @@ func (m model) View() string {
 
 // Run starts the interactive TUI for reordering sessions
 func Run(sessions []storage.SessionData, onSave func([]storage.SessionData) error) error {
+	// Load config to get wrap around setting
+	config, err := storage.LoadConfig()
+	if err != nil {
+		// If config fails to load, use default (false)
+		config = &storage.Config{WrapAround: false}
+	}
+
 	m := model{
-		sessions: sessions,
-		cursor:   0,
-		mode:     normalMode,
-		onSave:   onSave,
+		sessions:   sessions,
+		cursor:     0,
+		mode:       normalMode,
+		onSave:     onSave,
+		wrapAround: config.WrapAround,
 	}
 
 	p := tea.NewProgram(m)
