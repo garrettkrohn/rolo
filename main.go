@@ -61,41 +61,84 @@ func findSessionIndex(sessions []storage.SessionData, target string) int {
 	return -1
 }
 
-func findNextActiveSession(sessions []storage.SessionData, currentIndex int) int {
+func findNextActiveSession(sessions []storage.SessionData, currentIndex int, wrapAround bool) int {
 	if len(sessions) == 0 {
 		return -1
 	}
 	
-	// Start from the next index and wrap around
-	for i := 1; i <= len(sessions); i++ {
-		nextIndex := (currentIndex + i) % len(sessions)
+	// Determine the search range based on wrapAround setting
+	maxIterations := len(sessions)
+	if !wrapAround {
+		// Only search from current position to end
+		maxIterations = len(sessions) - currentIndex - 1
+	}
+	
+	// Start from the next index
+	for i := 1; i <= maxIterations; i++ {
+		var nextIndex int
+		if wrapAround {
+			// Wrap around to the beginning
+			nextIndex = (currentIndex + i) % len(sessions)
+		} else {
+			// Don't wrap around
+			nextIndex = currentIndex + i
+			if nextIndex >= len(sessions) {
+				break
+			}
+		}
+		
 		if !sessions[nextIndex].Deleted {
 			return nextIndex
 		}
 	}
 	
-	// All sessions are deleted
+	// No active session found
 	return -1
 }
 
-func findPrevActiveSession(sessions []storage.SessionData, currentIndex int) int {
+func findPrevActiveSession(sessions []storage.SessionData, currentIndex int, wrapAround bool) int {
 	if len(sessions) == 0 {
 		return -1
 	}
 	
-	// Start from the previous index and wrap around
-	for i := 1; i <= len(sessions); i++ {
-		prevIndex := (currentIndex - i + len(sessions)) % len(sessions)
+	// Determine the search range based on wrapAround setting
+	maxIterations := len(sessions)
+	if !wrapAround {
+		// Only search from current position to beginning
+		maxIterations = currentIndex
+	}
+	
+	// Start from the previous index
+	for i := 1; i <= maxIterations; i++ {
+		var prevIndex int
+		if wrapAround {
+			// Wrap around to the end
+			prevIndex = (currentIndex - i + len(sessions)) % len(sessions)
+		} else {
+			// Don't wrap around
+			prevIndex = currentIndex - i
+			if prevIndex < 0 {
+				break
+			}
+		}
+		
 		if !sessions[prevIndex].Deleted {
 			return prevIndex
 		}
 	}
 	
-	// All sessions are deleted
+	// No active session found
 	return -1
 }
 
 func handleNext() {
+	// Load config
+	config, err := storage.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Get current session
 	currentSession, err := tmux.GetCurrentSession()
 	if err != nil {
@@ -118,8 +161,8 @@ func handleNext() {
 	// Find current session index
 	currentIndex := findSessionIndex(sessions, currentSession)
 	if currentIndex == -1 {
-		fmt.Fprintf(os.Stderr, "Current session '%s' not found in rolo config. Run 'rolo populate' to update.\n", currentSession)
-		os.Exit(1)
+		// Current session not in list, attach to first active session
+		currentIndex = -1 // Start from beginning
 	}
 
 	// Try to find next active session, skipping ones that don't exist
@@ -128,10 +171,15 @@ func handleNext() {
 	
 	for tried < maxAttempts {
 		// Find next active (non-deleted) session
-		nextIndex := findNextActiveSession(sessions, currentIndex)
+		nextIndex := findNextActiveSession(sessions, currentIndex, config.WrapAround)
 		if nextIndex == -1 {
-			fmt.Fprintf(os.Stderr, "No active sessions available (all are deleted)\n")
-			os.Exit(1)
+			if !config.WrapAround {
+				// Fail silently when at the end and not wrapping
+				return
+			} else {
+				fmt.Fprintf(os.Stderr, "No active sessions available (all are deleted)\n")
+				os.Exit(1)
+			}
 		}
 		
 		nextSession := sessions[nextIndex].Name
@@ -163,6 +211,13 @@ func handleNext() {
 }
 
 func handlePrev() {
+	// Load config
+	config, err := storage.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Get current session
 	currentSession, err := tmux.GetCurrentSession()
 	if err != nil {
@@ -185,8 +240,8 @@ func handlePrev() {
 	// Find current session index
 	currentIndex := findSessionIndex(sessions, currentSession)
 	if currentIndex == -1 {
-		fmt.Fprintf(os.Stderr, "Current session '%s' not found in rolo config. Run 'rolo populate' to update.\n", currentSession)
-		os.Exit(1)
+		// Current session not in list, attach to first active session
+		currentIndex = -1 // Start from beginning
 	}
 
 	// Try to find previous active session, skipping ones that don't exist
@@ -195,10 +250,15 @@ func handlePrev() {
 	
 	for tried < maxAttempts {
 		// Find previous active (non-deleted) session
-		prevIndex := findPrevActiveSession(sessions, currentIndex)
+		prevIndex := findPrevActiveSession(sessions, currentIndex, config.WrapAround)
 		if prevIndex == -1 {
-			fmt.Fprintf(os.Stderr, "No active sessions available (all are deleted)\n")
-			os.Exit(1)
+			if !config.WrapAround {
+				// Fail silently when at the beginning and not wrapping
+				return
+			} else {
+				fmt.Fprintf(os.Stderr, "No active sessions available (all are deleted)\n")
+				os.Exit(1)
+			}
 		}
 		
 		prevSession := sessions[prevIndex].Name

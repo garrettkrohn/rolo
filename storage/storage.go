@@ -14,6 +14,11 @@ type SessionData struct {
 	Deleted bool   `json:"deleted"`
 }
 
+// Config represents the rolo configuration settings
+type Config struct {
+	WrapAround bool `json:"wrap_around"`
+}
+
 // GetConfigPath returns the path to the rolo config file
 func GetConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -30,6 +35,15 @@ func GetConfigJSONPath() (string, error) {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 	return filepath.Join(home, ".config", "rolo", "rolo.json"), nil
+}
+
+// GetConfigSettingsPath returns the path to the rolo settings config file
+func GetConfigSettingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "rolo", "config.json"), nil
 }
 
 // EnsureConfigDir creates the config directory if it doesn't exist
@@ -161,6 +175,57 @@ func SaveSessions(sessions []string) error {
 	}
 	
 	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	
+	return nil
+}
+
+// LoadConfig reads the configuration settings from the config file
+// Returns default config if the file doesn't exist
+func LoadConfig() (*Config, error) {
+	configPath, err := GetConfigSettingsPath()
+	if err != nil {
+		return nil, err
+	}
+	
+	// If file doesn't exist, return default config
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return &Config{
+			WrapAround: false,
+		}, nil
+	}
+	
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+	
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+	
+	return &config, nil
+}
+
+// SaveConfig writes the configuration settings to the config file
+func SaveConfig(config *Config) error {
+	if err := EnsureConfigDir(); err != nil {
+		return err
+	}
+	
+	configPath, err := GetConfigSettingsPath()
+	if err != nil {
+		return err
+	}
+	
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	
