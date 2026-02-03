@@ -9,6 +9,36 @@ import (
 	"rolo/tmux"
 )
 
+// Catppuccin Mocha color palette
+var (
+	catppuccinRosewater = lipgloss.Color("#f5e0dc")
+	catppuccinFlamingo  = lipgloss.Color("#f2cdcd")
+	catppuccinPink      = lipgloss.Color("#f5c2e7")
+	catppuccinMauve     = lipgloss.Color("#cba6f7")
+	catppuccinRed       = lipgloss.Color("#f38ba8")
+	catppuccinMaroon    = lipgloss.Color("#eba0ac")
+	catppuccinPeach     = lipgloss.Color("#fab387")
+	catppuccinYellow    = lipgloss.Color("#f9e2af")
+	catppuccinGreen     = lipgloss.Color("#a6e3a1")
+	catppuccinTeal      = lipgloss.Color("#94e2d5")
+	catppuccinSky       = lipgloss.Color("#89dceb")
+	catppuccinSapphire  = lipgloss.Color("#74c7ec")
+	catppuccinBlue      = lipgloss.Color("#89b4fa")
+	catppuccinLavender  = lipgloss.Color("#b4befe")
+	catppuccinText      = lipgloss.Color("#cdd6f4")
+	catppuccinSubtext1  = lipgloss.Color("#bac2de")
+	catppuccinSubtext0  = lipgloss.Color("#a6adc8")
+	catppuccinOverlay2  = lipgloss.Color("#9399b2")
+	catppuccinOverlay1  = lipgloss.Color("#7f849c")
+	catppuccinOverlay0  = lipgloss.Color("#6c7086")
+	catppuccinSurface2  = lipgloss.Color("#585b70")
+	catppuccinSurface1  = lipgloss.Color("#45475a")
+	catppuccinSurface0  = lipgloss.Color("#313244")
+	catppuccinBase      = lipgloss.Color("#1e1e2e")
+	catppuccinMantle    = lipgloss.Color("#181825")
+	catppuccinCrust     = lipgloss.Color("#11111b")
+)
+
 type mode int
 
 const (
@@ -156,32 +186,108 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	strikethroughStyle := lipgloss.NewStyle().Strikethrough(true)
+	// Styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(catppuccinMauve).
+		Background(catppuccinSurface0).
+		Padding(0, 2).
+		MarginBottom(1)
 	
-	s := "Reorder tmux sessions\n"
+	modeNormalStyle := lipgloss.NewStyle().
+		Foreground(catppuccinGreen).
+		Bold(true)
+	
+	modeMoveStyle := lipgloss.NewStyle().
+		Foreground(catppuccinPeach).
+		Bold(true)
+	
+	helpStyle := lipgloss.NewStyle().
+		Foreground(catppuccinSubtext0).
+		Italic(true)
+	
+	keybindStyle := lipgloss.NewStyle().
+		Foreground(catppuccinBlue).
+		Bold(true)
+	
+	cursorNormalStyle := lipgloss.NewStyle().
+		Foreground(catppuccinPink).
+		Bold(true)
+	
+	cursorMoveStyle := lipgloss.NewStyle().
+		Foreground(catppuccinPeach).
+		Bold(true)
+	
+	sessionActiveStyle := lipgloss.NewStyle().
+		Foreground(catppuccinText)
+	
+	sessionDeletedStyle := lipgloss.NewStyle().
+		Foreground(catppuccinOverlay0).
+		Strikethrough(true)
+	
+	sessionHighlightStyle := lipgloss.NewStyle().
+		Foreground(catppuccinText).
+		Background(catppuccinSurface0).
+		Bold(true)
+	
+	// Build the view
+	var s string
+	
+	// Title
+	s += titleStyle.Render("✨ Rolo - Tmux Session Manager") + "\n\n"
+	
+	// Mode indicator and help text
 	if m.mode == moveMode {
-		s += "[MOVE MODE] - j/k to move item, m to exit move mode\n\n"
+		modeText := modeMoveStyle.Render("MOVE MODE")
+		help := helpStyle.Render(
+			keybindStyle.Render("j/k") + " move item  " +
+			keybindStyle.Render("m") + " exit move mode",
+		)
+		s += modeText + " - " + help + "\n\n"
 	} else {
-		s += "[NORMAL] - j/k to navigate, d to delete, u to update, p to repopulate, m to enter move mode, enter to save\n\n"
+		modeText := modeNormalStyle.Render("NORMAL")
+		help := helpStyle.Render(
+			keybindStyle.Render("j/k") + " navigate  " +
+			keybindStyle.Render("d") + " delete  " +
+			keybindStyle.Render("u") + " update  " +
+			keybindStyle.Render("p") + " repopulate  " +
+			keybindStyle.Render("m") + " move  " +
+			keybindStyle.Render("enter") + " save",
+		)
+		s += modeText + " - " + help + "\n\n"
 	}
 
+	// Session list
 	for i, session := range m.sessions {
+		var line string
+		
+		// Cursor indicator
 		cursor := "  "
 		if m.cursor == i {
 			if m.mode == moveMode {
-				cursor = "▶ "
+				cursor = cursorMoveStyle.Render("▶ ")
 			} else {
-				cursor = "> "
+				cursor = cursorNormalStyle.Render("› ")
 			}
 		}
 		
+		// Session name with styling
 		sessionText := session.Name
 		if session.Deleted {
-			sessionText = strikethroughStyle.Render(session.Name)
+			sessionText = sessionDeletedStyle.Render(session.Name)
+		} else if m.cursor == i {
+			sessionText = sessionHighlightStyle.Render(session.Name)
+		} else {
+			sessionText = sessionActiveStyle.Render(session.Name)
 		}
 		
-		s += fmt.Sprintf("%s%s\n", cursor, sessionText)
+		line = cursor + sessionText
+		s += line + "\n"
 	}
+	
+	// Footer
+	s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(" or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
+	
 	return s
 }
 
