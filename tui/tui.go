@@ -78,13 +78,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If we can't get sessions, just keep current state
 				return m, nil
 			}
-			
+
 			// Convert to SessionData format (all non-deleted by default)
 			sessionData := make([]storage.SessionData, len(sessions))
 			for i, name := range sessions {
 				sessionData[i] = storage.SessionData{Name: name, Deleted: false}
 			}
-			
+
 			// Replace current sessions and reset cursor
 			m.sessions = sessionData
 			m.cursor = 0
@@ -99,13 +99,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If we can't get sessions, just keep current state
 				return m, nil
 			}
-			
+
 			// Create a map of active session names for quick lookup
 			activeNames := make(map[string]bool)
 			for _, name := range sessions {
 				activeNames[name] = true
 			}
-			
+
 			// Filter out sessions that are no longer active
 			filteredSessions := make([]storage.SessionData, 0, len(m.sessions))
 			for _, session := range m.sessions {
@@ -114,7 +114,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(activeNames, session.Name) // Remove from map so we know it's been seen
 				}
 			}
-			
+
 			// Add any new sessions that weren't in the list
 			for name := range activeNames {
 				filteredSessions = append(filteredSessions, storage.SessionData{
@@ -122,7 +122,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Deleted: false,
 				})
 			}
-			
+
 			// Update sessions and adjust cursor if needed
 			m.sessions = filteredSessions
 			if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
@@ -171,11 +171,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "s":
+			fallthrough
 		case "enter":
 			// Save and quit
 			if m.onSave != nil {
 				if err := m.onSave(m.sessions); err != nil {
-					// Could add error handling here
 					return m, tea.Quit
 				}
 			}
@@ -193,66 +194,66 @@ func (m model) View() string {
 		Background(catppuccinSurface0).
 		Padding(0, 2).
 		MarginBottom(1)
-	
+
 	modeNormalStyle := lipgloss.NewStyle().
 		Foreground(catppuccinGreen).
 		Bold(true)
-	
+
 	modeMoveStyle := lipgloss.NewStyle().
 		Foreground(catppuccinPeach).
 		Bold(true)
-	
+
 	helpStyle := lipgloss.NewStyle().
 		Foreground(catppuccinSubtext0).
 		Italic(true)
-	
+
 	keybindStyle := lipgloss.NewStyle().
 		Foreground(catppuccinBlue).
 		Bold(true)
-	
+
 	cursorNormalStyle := lipgloss.NewStyle().
 		Foreground(catppuccinPink).
 		Bold(true)
-	
+
 	cursorMoveStyle := lipgloss.NewStyle().
 		Foreground(catppuccinPeach).
 		Bold(true)
-	
+
 	sessionActiveStyle := lipgloss.NewStyle().
 		Foreground(catppuccinText)
-	
+
 	sessionDeletedStyle := lipgloss.NewStyle().
 		Foreground(catppuccinOverlay0).
 		Strikethrough(true)
-	
+
 	sessionHighlightStyle := lipgloss.NewStyle().
 		Foreground(catppuccinText).
 		Background(catppuccinSurface0).
 		Bold(true)
-	
+
 	// Build the view
 	var s string
-	
+
 	// Title
 	s += titleStyle.Render("✨ Rolo - Tmux Session Manager") + "\n\n"
-	
+
 	// Mode indicator and help text
 	if m.mode == moveMode {
 		modeText := modeMoveStyle.Render("MOVE MODE")
 		help := helpStyle.Render(
 			keybindStyle.Render("j/k") + " move item  " +
-			keybindStyle.Render("m") + " exit move mode",
+				keybindStyle.Render("m") + " exit move mode",
 		)
 		s += modeText + " - " + help + "\n\n"
 	} else {
 		modeText := modeNormalStyle.Render("NORMAL")
 		help := helpStyle.Render(
 			keybindStyle.Render("j/k") + " navigate  " +
-			keybindStyle.Render("d") + " delete  " +
-			keybindStyle.Render("u") + " update  " +
-			keybindStyle.Render("p") + " repopulate  " +
-			keybindStyle.Render("m") + " move  " +
-			keybindStyle.Render("enter") + " save",
+				keybindStyle.Render("d") + " delete  " +
+				keybindStyle.Render("u") + " update  " +
+				keybindStyle.Render("p") + " repopulate  " +
+				keybindStyle.Render("m") + " move  " +
+				keybindStyle.Render("s/enter") + " save",
 		)
 		s += modeText + " - " + help + "\n\n"
 	}
@@ -260,7 +261,7 @@ func (m model) View() string {
 	// Session list
 	for i, session := range m.sessions {
 		var line string
-		
+
 		// Cursor indicator
 		cursor := "  "
 		if m.cursor == i {
@@ -270,7 +271,7 @@ func (m model) View() string {
 				cursor = cursorNormalStyle.Render("› ")
 			}
 		}
-		
+
 		// Session name with styling
 		sessionText := session.Name
 		if session.Deleted {
@@ -280,14 +281,14 @@ func (m model) View() string {
 		} else {
 			sessionText = sessionActiveStyle.Render(session.Name)
 		}
-		
+
 		line = cursor + sessionText
 		s += line + "\n"
 	}
-	
+
 	// Footer
 	s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(" or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
-	
+
 	return s
 }
 

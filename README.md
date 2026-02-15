@@ -33,6 +33,13 @@ Session names are stored in `~/.config/rolo/rolo.json` (one per line in JSON for
 
 The config directory and files will be created automatically on first save.
 
+## Tmux config
+```
+bind-key "r" run-shell "tmux popup -E -w 40% -h 60% 'rolo'"
+bind-key j run-shell "rolo next"
+bind-key k run-shell "rolo prev"
+```
+
 ### Settings
 
 You can configure rolo behavior in `~/.config/rolo/config.json`:
