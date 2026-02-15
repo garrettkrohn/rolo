@@ -5,10 +5,13 @@ A terminal UI application for reordering tmux sessions using vim-like keybinding
 ## Features
 
 - Navigate sessions with `j`/`k` keys
+- Delete/hide sessions with `d` key
+- Repopulate or update session list with `p`/`u` keys
 - Enter move mode with `m` to reorder sessions
 - Save and exit with `Enter`
 - Quit without saving with `q` or `Ctrl+C`
-- Persistent storage in `~/.config/rolo/rolo.txt`
+- Configurable wrap-around navigation in `~/.config/rolo/config.json`
+- Persistent storage in `~/.config/rolo/rolo.json`
 
 ## Installation
 
@@ -18,15 +21,29 @@ go build -o rolo
 
 ## Configuration
 
-Session names are stored in `~/.config/rolo/rolo.txt` (one per line):
+Session names are stored in `~/.config/rolo/rolo.json` (one per line in JSON format):
 
-```
-session-1
-session-2
-session-3
+```json
+[
+  {"name": "session-1", "deleted": false},
+  {"name": "session-2", "deleted": false},
+  {"name": "session-3", "deleted": false}
+]
 ```
 
-The config directory and file will be created automatically on first save.
+The config directory and files will be created automatically on first save.
+
+### Settings
+
+You can configure rolo behavior in `~/.config/rolo/config.json`:
+
+```json
+{
+  "wrap_around": false
+}
+```
+
+- `wrap_around`: When true, navigation wraps around (next from last session goes to first, prev from first goes to last). Default is `false`.
 
 ## Usage
 
@@ -38,7 +55,7 @@ Fetch all active tmux sessions and save them to the config file:
 ./rolo populate
 ```
 
-This will read all active tmux sessions and write them to `~/.config/rolo/rolo.txt`.
+This will read all active tmux sessions and write them to `~/.config/rolo/rolo.json`.
 
 ### Interactive Mode
 
@@ -63,8 +80,9 @@ Switch to the previous session in your ordered list:
 ```
 
 These commands:
-- Use the order defined in `~/.config/rolo/rolo.txt`
-- Wrap around (next from last session goes to first, prev from first goes to last)
+- Use the order defined in `~/.config/rolo/rolo.json`
+- Wrap around (next from last session goes to first, prev from first goes to last) if enabled in config
+- Automatically skip sessions that no longer exist (marked as deleted)
 - Must be run from inside a tmux session
 
 ### Help
@@ -84,7 +102,7 @@ These commands:
    ```bash
    ./rolo
    ```
-   Use `j`/`k` to navigate, `m` to move items, `Enter` to save
+   Use `j`/`k` to navigate, `d` to hide deleted sessions, `m` to move items, `Enter` to save
 
 3. **Navigate** - Switch between sessions using your custom order:
    ```bash
@@ -105,8 +123,11 @@ Then use `prefix + f` to go forward (next) and `prefix + d` to go back (previous
 ## Keybindings
 
 ### Normal Mode
-- `j` - Move cursor down
-- `k` - Move cursor up
+- `j` - Move cursor down (wraps around if enabled)
+- `k` - Move cursor up (wraps around if enabled)
+- `d` - Toggle delete/hide state for current session
+- `p` - Repopulate list from active tmux sessions
+- `u` - Update list (add new sessions, remove closed ones)
 - `m` - Enter move mode
 - `Enter` - Save order and quit
 - `q` or `Ctrl+C` - Quit without saving
