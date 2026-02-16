@@ -62,13 +62,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
+
+		case "o":
+			// Attach to the session under cursor
+			if m.cursor < len(m.sessions) {
+				sessionName := m.sessions[m.cursor].Name
+				if err := tmux.AttachToSession(sessionName); err != nil {
+					// If attach fails, just continue
+					return m, nil
+				}
+				// Save before attaching
+				if m.onSave != nil {
+					m.onSave(m.sessions)
+				}
+				return m, tea.Quit
+			}
 
 		case "d":
 			// Toggle deleted state for current session
 			if m.cursor < len(m.sessions) {
 				m.sessions[m.cursor].Deleted = !m.sessions[m.cursor].Deleted
+			}
+
+		case "D":
+			// Kill the tmux session under cursor
+			if m.cursor < len(m.sessions) {
+				sessionName := m.sessions[m.cursor].Name
+				if err := tmux.KillSession(sessionName); err != nil {
+					// If kill fails, just mark as deleted
+					m.sessions[m.cursor].Deleted = true
+				} else {
+					// Remove the session from the list
+					m.sessions = append(m.sessions[:m.cursor], m.sessions[m.cursor+1:]...)
+					// Adjust cursor if needed
+					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
+						m.cursor = len(m.sessions) - 1
+					}
+				}
 			}
 
 		case "p":
@@ -171,9 +203,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "s":
-			fallthrough
-		case "enter":
+		case "enter", "s":
 			// Save and quit
 			if m.onSave != nil {
 				if err := m.onSave(m.sessions); err != nil {
@@ -235,7 +265,7 @@ func (m model) View() string {
 	var s string
 
 	// Title
-	s += titleStyle.Render("✨ Rolo - Tmux Session Manager") + "\n\n"
+	s += titleStyle.Render("✨ Rolo - Tmux Rolodex") + "\n\n"
 
 	// Mode indicator and help text
 	if m.mode == moveMode {
@@ -249,7 +279,9 @@ func (m model) View() string {
 		modeText := modeNormalStyle.Render("NORMAL")
 		help := helpStyle.Render(
 			keybindStyle.Render("j/k") + " navigate  " +
+				keybindStyle.Render("o") + " attach  " +
 				keybindStyle.Render("d") + " delete  " +
+				keybindStyle.Render("D") + " kill  " +
 				keybindStyle.Render("u") + " update  " +
 				keybindStyle.Render("p") + " repopulate  " +
 				keybindStyle.Render("m") + " move  " +
@@ -287,7 +319,7 @@ func (m model) View() string {
 	}
 
 	// Footer
-	s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(" or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
+	s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(", ") + keybindStyle.Render("esc") + helpStyle.Render(", or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
 
 	return s
 }

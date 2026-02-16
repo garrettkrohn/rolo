@@ -71,3 +71,39 @@ func SwitchToSession(sessionName string) error {
 
 	return nil
 }
+
+// KillSession kills the specified tmux session
+func KillSession(sessionName string) error {
+	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("failed to kill session '%s': %s", sessionName, string(exitErr.Stderr))
+		}
+		return fmt.Errorf("failed to kill session '%s': %w", sessionName, err)
+	}
+
+	return nil
+}
+
+// AttachToSession attaches to the specified tmux session
+// If already in a tmux session, it switches to the target session
+// If not in a tmux session, it attaches to the target session
+func AttachToSession(sessionName string) error {
+	// Check if we're already in a tmux session
+	_, err := GetCurrentSession()
+	if err == nil {
+		// We're in a tmux session, so use switch-client
+		return SwitchToSession(sessionName)
+	}
+
+	// Not in a tmux session, so use attach-session
+	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("failed to attach to session '%s': %s", sessionName, string(exitErr.Stderr))
+		}
+		return fmt.Errorf("failed to attach to session '%s': %w", sessionName, err)
+	}
+
+	return nil
+}
