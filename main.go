@@ -9,8 +9,8 @@ import (
 	"rolo/tui"
 )
 
-func saveOrder(sessions []storage.SessionData) error {
-	return storage.SaveSessionsData(sessions)
+func saveGroupsOrder(groupsData *storage.GroupsData) error {
+	return storage.SaveGroupsData(groupsData)
 }
 
 func showUsage() {
@@ -19,6 +19,9 @@ func showUsage() {
 	fmt.Println("  rolo populate - Fetch active tmux sessions and save to config")
 	fmt.Println("  rolo next     - Switch to next session in order")
 	fmt.Println("  rolo prev     - Switch to previous session in order")
+	fmt.Println("  rolo left     - Switch to previous group")
+	fmt.Println("  rolo right    - Switch to next group")
+	fmt.Println("  rolo context  - List working directories of sessions in current group")
 	fmt.Println("  rolo help     - Show this help message")
 }
 
@@ -34,19 +37,29 @@ func handlePopulate() {
 		return
 	}
 
+	// Load existing groups data (or create default)
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Convert to SessionData format (all non-deleted by default)
 	sessionData := make([]storage.SessionData, len(sessions))
 	for i, name := range sessions {
 		sessionData[i] = storage.SessionData{Name: name, Deleted: false}
 	}
 
-	if err := storage.SaveSessionsData(sessionData); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving sessions: %v\n", err)
+	// Add sessions to current group
+	groupsData.Groups[groupsData.CurrentGroup].Sessions = sessionData
+
+	if err := storage.SaveGroupsData(groupsData); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving groups: %v\n", err)
 		os.Exit(1)
 	}
 
-	configPath, _ := storage.GetConfigJSONPath()
-	fmt.Printf("Saved %d session(s) to %s:\n", len(sessions), configPath)
+	currentGroupName := groupsData.Groups[groupsData.CurrentGroup].Name
+	fmt.Printf("Saved %d session(s) to group '%s':\n", len(sessions), currentGroupName)
 	for _, session := range sessions {
 		fmt.Printf("  - %s\n", session)
 	}
@@ -146,16 +159,32 @@ func handleNext() {
 		os.Exit(1)
 	}
 
-	// Load ordered sessions
-	sessions, err := storage.LoadSessionsData()
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading sessions: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Get current group's sessions
+	sessions := groupsData.Groups[groupsData.CurrentGroup].Sessions
+
 	if len(sessions) == 0 {
-		fmt.Fprintf(os.Stderr, "No sessions configured. Run 'rolo populate' first.\n")
+		fmt.Fprintf(os.Stderr, "No sessions in current group. Run 'rolo populate' first.\n")
 		os.Exit(1)
+	}
+
+	// Count non-deleted sessions
+	activeCount := 0
+	for _, s := range sessions {
+		if !s.Deleted {
+			activeCount++
+		}
+	}
+
+	// If only one active session, nothing to switch to
+	if activeCount <= 1 {
+		return
 	}
 
 	// Find current session index
@@ -168,7 +197,7 @@ func handleNext() {
 	// Try to find next active session, skipping ones that don't exist
 	tried := 0
 	maxAttempts := len(sessions)
-	
+
 	for tried < maxAttempts {
 		// Find next active (non-deleted) session
 		nextIndex := findNextActiveSession(sessions, currentIndex, config.WrapAround)
@@ -181,30 +210,31 @@ func handleNext() {
 				os.Exit(1)
 			}
 		}
-		
+
 		nextSession := sessions[nextIndex].Name
-		
+
 		// Try to switch to next session
 		if err := tmux.SwitchToSession(nextSession); err != nil {
 			// Log the error and mark session as deleted
 			fmt.Fprintf(os.Stderr, "Warning: Session '%s' doesn't exist, skipping: %v\n", nextSession, err)
 			sessions[nextIndex].Deleted = true
-			
+
 			// Save the updated state
-			if saveErr := storage.SaveSessionsData(sessions); saveErr != nil {
+			groupsData.Groups[groupsData.CurrentGroup].Sessions = sessions
+			if saveErr := storage.SaveGroupsData(groupsData); saveErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to save updated session state: %v\n", saveErr)
 			}
-			
+
 			// Try the next one
 			currentIndex = nextIndex
 			tried++
 			continue
 		}
-		
+
 		// Success!
 		return
 	}
-	
+
 	// If we've tried all sessions and none worked
 	fmt.Fprintf(os.Stderr, "Error: No valid sessions found\n")
 	os.Exit(1)
@@ -225,16 +255,32 @@ func handlePrev() {
 		os.Exit(1)
 	}
 
-	// Load ordered sessions
-	sessions, err := storage.LoadSessionsData()
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading sessions: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Get current group's sessions
+	sessions := groupsData.Groups[groupsData.CurrentGroup].Sessions
+
 	if len(sessions) == 0 {
-		fmt.Fprintf(os.Stderr, "No sessions configured. Run 'rolo populate' first.\n")
+		fmt.Fprintf(os.Stderr, "No sessions in current group. Run 'rolo populate' first.\n")
 		os.Exit(1)
+	}
+
+	// Count non-deleted sessions
+	activeCount := 0
+	for _, s := range sessions {
+		if !s.Deleted {
+			activeCount++
+		}
+	}
+
+	// If only one active session, nothing to switch to
+	if activeCount <= 1 {
+		return
 	}
 
 	// Find current session index
@@ -247,7 +293,7 @@ func handlePrev() {
 	// Try to find previous active session, skipping ones that don't exist
 	tried := 0
 	maxAttempts := len(sessions)
-	
+
 	for tried < maxAttempts {
 		// Find previous active (non-deleted) session
 		prevIndex := findPrevActiveSession(sessions, currentIndex, config.WrapAround)
@@ -260,59 +306,158 @@ func handlePrev() {
 				os.Exit(1)
 			}
 		}
-		
+
 		prevSession := sessions[prevIndex].Name
-		
+
 		// Try to switch to previous session
 		if err := tmux.SwitchToSession(prevSession); err != nil {
 			// Log the error and mark session as deleted
 			fmt.Fprintf(os.Stderr, "Warning: Session '%s' doesn't exist, skipping: %v\n", prevSession, err)
 			sessions[prevIndex].Deleted = true
-			
+
 			// Save the updated state
-			if saveErr := storage.SaveSessionsData(sessions); saveErr != nil {
+			groupsData.Groups[groupsData.CurrentGroup].Sessions = sessions
+			if saveErr := storage.SaveGroupsData(groupsData); saveErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to save updated session state: %v\n", saveErr)
 			}
-			
+
 			// Try the next one
 			currentIndex = prevIndex
 			tried++
 			continue
 		}
-		
+
 		// Success!
 		return
 	}
-	
+
 	// If we've tried all sessions and none worked
 	fmt.Fprintf(os.Stderr, "Error: No valid sessions found\n")
 	os.Exit(1)
 }
 
-func runInteractiveMode() {
-	// Load sessions from storage
-	sessions, err := storage.LoadSessionsData()
+func handleLeft() {
+	// Load config
+	config, err := storage.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading sessions: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// If no sessions exist, provide a helpful message
-	if len(sessions) == 0 {
-		sessions = []storage.SessionData{
-			{Name: "No sessions found", Deleted: false},
-			{Name: "Run 'rolo populate' to fetch tmux sessions", Deleted: false},
-		}
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
 	}
 
-	// Run the TUI
-	if err := tui.Run(sessions, saveOrder); err != nil {
+	// Move to previous group
+	if err := storage.PrevGroup(groupsData, config.WrapAround); err != nil {
+		fmt.Fprintf(os.Stderr, "Error switching groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save updated state
+	if err := storage.SaveGroupsData(groupsData); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving groups: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleRight() {
+	// Load config
+	config, err := storage.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Move to next group
+	if err := storage.NextGroup(groupsData, config.WrapAround); err != nil {
+		fmt.Fprintf(os.Stderr, "Error switching groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save updated state
+	if err := storage.SaveGroupsData(groupsData); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving groups: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleContext() {
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get current group's sessions
+	sessions := groupsData.Groups[groupsData.CurrentGroup].Sessions
+
+	if len(sessions) == 0 {
+		// No sessions in current group, exit silently
+		return
+	}
+
+	// Collect working directories for non-deleted sessions
+	var paths []string
+	for _, session := range sessions {
+		// Skip deleted sessions
+		if session.Deleted {
+			continue
+		}
+
+		// Get working directory for this session
+		path, err := tmux.GetSessionWorkingDirectory(session.Name)
+		if err != nil {
+			// Session might not exist anymore, skip it
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			continue
+		}
+
+		paths = append(paths, path)
+	}
+
+	// Output paths, one per line
+	for _, path := range paths {
+		fmt.Println(path)
+	}
+}
+
+func runInteractiveMode() {
+	// Migrate old format if needed
+	if err := storage.MigrateToGroupsFormat(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error migrating data: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load groups from storage
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run the TUI with groups support
+	if err := tui.RunWithGroups(groupsData, saveGroupsOrder); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func main() {
+	// Auto-migrate old format on first use
+	storage.MigrateToGroupsFormat()
+
 	// Parse command line arguments
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -324,6 +469,15 @@ func main() {
 			return
 		case "prev", "previous":
 			handlePrev()
+			return
+		case "left":
+			handleLeft()
+			return
+		case "right":
+			handleRight()
+			return
+		case "context":
+			handleContext()
 			return
 		case "help", "-h", "--help":
 			showUsage()

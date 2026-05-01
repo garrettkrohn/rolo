@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"rolo/storage"
@@ -44,26 +46,195 @@ type mode int
 const (
 	normalMode mode = iota
 	moveMode
+	inputMode
+	confirmMode
+)
+
+type inputAction int
+
+const (
+	createGroupAction inputAction = iota
+	renameGroupAction
 )
 
 type model struct {
-	sessions   []storage.SessionData
-	cursor     int
-	mode       mode
-	onSave     func([]storage.SessionData) error
-	wrapAround bool
+	sessions      []storage.SessionData
+	cursor        int
+	mode          mode
+	onSave        func([]storage.SessionData) error
+	wrapAround    bool
+	groupsData    *storage.GroupsData
+	textInput     textinput.Model
+	inputAction   inputAction
+	confirmPrompt string
+	showDeleted   bool
+	config        *storage.Config
+	showKeymap    bool
 }
 
 func (m model) Init() tea.Cmd {
 	return nil
 }
 
+// isSessionVisible returns true if a session should be visible in the list
+func (m model) isSessionVisible(index int) bool {
+	if index < 0 || index >= len(m.sessions) {
+		return false
+	}
+	// Session is visible if it's not deleted, or if we're showing deleted sessions
+	return !m.sessions[index].Deleted || m.showDeleted
+}
+
+// findNextVisibleSession finds the next visible session from the current position
+// Returns -1 if no visible session is found
+func (m model) findNextVisibleSession(start int) int {
+	for i := start + 1; i < len(m.sessions); i++ {
+		if m.isSessionVisible(i) {
+			return i
+		}
+	}
+	// If wrapAround is enabled, search from the beginning
+	if m.wrapAround {
+		for i := 0; i < start; i++ {
+			if m.isSessionVisible(i) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// findPrevVisibleSession finds the previous visible session from the current position
+// Returns -1 if no visible session is found
+func (m model) findPrevVisibleSession(start int) int {
+	for i := start - 1; i >= 0; i-- {
+		if m.isSessionVisible(i) {
+			return i
+		}
+	}
+	// If wrapAround is enabled, search from the end
+	if m.wrapAround {
+		for i := len(m.sessions) - 1; i > start; i-- {
+			if m.isSessionVisible(i) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// ensureCursorOnVisibleSession moves cursor to nearest visible session if current position is hidden
+func (m *model) ensureCursorOnVisibleSession() {
+	if len(m.sessions) == 0 {
+		m.cursor = 0
+		return
+	}
+
+	// If current position is visible, we're good
+	if m.isSessionVisible(m.cursor) {
+		return
+	}
+
+	// Try to find next visible session
+	next := m.findNextVisibleSession(m.cursor)
+	if next != -1 {
+		m.cursor = next
+		return
+	}
+
+	// Try to find previous visible session
+	prev := m.findPrevVisibleSession(m.cursor)
+	if prev != -1 {
+		m.cursor = prev
+		return
+	}
+
+	// No visible sessions at all, reset cursor to 0
+	m.cursor = 0
+}
+
+// getAllGroupNames returns all group names with indicator for current group
+func getAllGroupNames(groupsData *storage.GroupsData) string {
+	if groupsData == nil || len(groupsData.Groups) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for i, group := range groupsData.Groups {
+		if i == groupsData.CurrentGroup {
+			parts = append(parts, "👉 "+group.Name)
+		} else {
+			parts = append(parts, group.Name)
+		}
+	}
+
+	return strings.Join(parts, " | ")
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle confirm mode
+		if m.mode == confirmMode {
+			switch msg.String() {
+			case "y", "Y":
+				// Confirm delete
+				if len(m.groupsData.Groups) > 1 {
+					storage.DeleteGroup(m.groupsData, m.groupsData.CurrentGroup)
+					// Update sessions to show new current group
+					m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
+					m.cursor = 0
+				}
+				m.mode = normalMode
+				return m, nil
+			case "n", "N", "esc":
+				// Cancel
+				m.mode = normalMode
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Handle input mode separately
+		if m.mode == inputMode {
+			switch msg.String() {
+			case "esc":
+				// Cancel input
+				m.mode = normalMode
+				return m, nil
+			case "enter":
+				// Submit input
+				inputValue := strings.TrimSpace(m.textInput.Value())
+
+				if m.inputAction == createGroupAction {
+					if err := storage.CreateGroup(m.groupsData, inputValue); err == nil {
+						// Successfully created group
+						m.mode = normalMode
+					}
+					// If error, stay in input mode so user can fix it
+				} else if m.inputAction == renameGroupAction {
+					if err := storage.RenameGroup(m.groupsData, m.groupsData.CurrentGroup, inputValue); err == nil {
+						m.mode = normalMode
+					}
+				}
+				return m, nil
+			default:
+				// Update text input
+				var cmd tea.Cmd
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// Normal mode and move mode handling
 		switch msg.String() {
-		case "q", "ctrl+c", "esc":
+		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "esc":
+			if m.mode == moveMode {
+				m.mode = normalMode
+			}
+			return m, nil
 
 		case "o":
 			// Attach to the session under cursor
@@ -79,6 +250,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
+
+		case "?":
+			// Toggle keymap visibility
+			m.showKeymap = !m.showKeymap
+
+		case "t":
+			// Toggle showing deleted sessions
+			m.showDeleted = !m.showDeleted
+			// Save the preference to config
+			if m.config != nil {
+				m.config.ShowDeleted = m.showDeleted
+				storage.SaveConfig(m.config)
+			}
+			// Ensure cursor is on a visible session
+			m.ensureCursorOnVisibleSession()
 
 		case "d":
 			// Toggle deleted state for current session
@@ -171,41 +357,129 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "j":
 			if m.mode == normalMode {
-				// Move cursor down
-				if m.cursor < len(m.sessions)-1 {
-					m.cursor++
-				} else if m.wrapAround && len(m.sessions) > 0 {
-					m.cursor = 0
+				// Move cursor down to next visible session
+				next := m.findNextVisibleSession(m.cursor)
+				if next != -1 {
+					m.cursor = next
 				}
 			} else {
-				// Move item down
-				if m.cursor < len(m.sessions)-1 {
-					m.sessions[m.cursor], m.sessions[m.cursor+1] =
-						m.sessions[m.cursor+1], m.sessions[m.cursor]
-					m.cursor++
+				// Move item down - swap with next visible session
+				next := m.findNextVisibleSession(m.cursor)
+				if next != -1 {
+					m.sessions[m.cursor], m.sessions[next] =
+						m.sessions[next], m.sessions[m.cursor]
+					m.cursor = next
 				}
 			}
 
 		case "k":
 			if m.mode == normalMode {
-				// Move cursor up
-				if m.cursor > 0 {
-					m.cursor--
-				} else if m.wrapAround && len(m.sessions) > 0 {
-					m.cursor = len(m.sessions) - 1
+				// Move cursor up to previous visible session
+				prev := m.findPrevVisibleSession(m.cursor)
+				if prev != -1 {
+					m.cursor = prev
 				}
 			} else {
-				// Move item up
-				if m.cursor > 0 {
-					m.sessions[m.cursor], m.sessions[m.cursor-1] =
-						m.sessions[m.cursor-1], m.sessions[m.cursor]
-					m.cursor--
+				// Move item up - swap with previous visible session
+				prev := m.findPrevVisibleSession(m.cursor)
+				if prev != -1 {
+					m.sessions[m.cursor], m.sessions[prev] =
+						m.sessions[prev], m.sessions[m.cursor]
+					m.cursor = prev
+				}
+			}
+
+		case "h":
+			// Switch to previous group
+			if m.groupsData != nil && len(m.groupsData.Groups) > 1 {
+				storage.PrevGroup(m.groupsData, m.wrapAround)
+				// Update sessions to show current group
+				m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
+				m.cursor = 0 // Reset cursor
+				m.ensureCursorOnVisibleSession()
+				// Auto-save current group immediately so CLI commands see it
+				storage.SaveGroupsData(m.groupsData)
+			}
+
+		case "l":
+			// Switch to next group
+			if m.groupsData != nil && len(m.groupsData.Groups) > 1 {
+				storage.NextGroup(m.groupsData, m.wrapAround)
+				// Update sessions to show current group
+				m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
+				m.cursor = 0 // Reset cursor
+				m.ensureCursorOnVisibleSession()
+				// Auto-save current group immediately so CLI commands see it
+				storage.SaveGroupsData(m.groupsData)
+			}
+
+		case "n":
+			// Create new group
+			if m.groupsData != nil {
+				m.mode = inputMode
+				m.inputAction = createGroupAction
+				m.textInput = textinput.New()
+				m.textInput.Placeholder = "Enter group name"
+				m.textInput.Focus()
+			}
+
+		case "r":
+			// Rename current group
+			if m.groupsData != nil {
+				m.mode = inputMode
+				m.inputAction = renameGroupAction
+				m.textInput = textinput.New()
+				m.textInput.Placeholder = "Enter new name"
+				// Pre-fill with current name
+				currentName := m.groupsData.Groups[m.groupsData.CurrentGroup].Name
+				m.textInput.SetValue(currentName)
+				m.textInput.Focus()
+			}
+
+		case "X":
+			// Delete current group (with confirmation)
+			if m.groupsData != nil && len(m.groupsData.Groups) > 1 {
+				groupName := m.groupsData.Groups[m.groupsData.CurrentGroup].Name
+				sessionCount := len(m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions)
+				m.confirmPrompt = fmt.Sprintf("Delete group '%s' (%d sessions)? (y/n)", groupName, sessionCount)
+				m.mode = confirmMode
+			}
+
+		case "H":
+			// Move current session to previous group
+			if m.groupsData != nil && len(m.groupsData.Groups) > 1 && m.cursor < len(m.sessions) {
+				if err := storage.MoveSessionToPrevGroup(m.groupsData, m.cursor, m.wrapAround); err == nil {
+					// Update sessions after move
+					m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
+					// Adjust cursor if needed
+					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
+						m.cursor = len(m.sessions) - 1
+					}
+				}
+			}
+
+		case "L":
+			// Move current session to next group
+			if m.groupsData != nil && len(m.groupsData.Groups) > 1 && m.cursor < len(m.sessions) {
+				if err := storage.MoveSessionToNextGroup(m.groupsData, m.cursor, m.wrapAround); err == nil {
+					// Update sessions after move
+					m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
+					// Adjust cursor if needed
+					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
+						m.cursor = len(m.sessions) - 1
+					}
 				}
 			}
 
 		case "enter", "s":
 			// Save and quit
-			if m.onSave != nil {
+			if m.groupsData != nil {
+				// Update current group's sessions before saving
+				m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+				// Save immediately in groups mode
+				storage.SaveGroupsData(m.groupsData)
+			} else if m.onSave != nil {
+				// Legacy mode: use callback
 				if err := m.onSave(m.sessions); err != nil {
 					return m, tea.Quit
 				}
@@ -264,11 +538,30 @@ func (m model) View() string {
 	// Build the view
 	var s string
 
-	// Title
-	s += titleStyle.Render("✨ Rolo - Tmux Rolodex") + "\n\n"
+	// Title with group navigation
+	title := "✨ Rolo - Tmux Rolodex"
+	if m.groupsData != nil {
+		groupNav := getAllGroupNames(m.groupsData)
+		if groupNav != "" {
+			title = title + "\n" + groupNav
+		}
+	}
+	s += titleStyle.Render(title) + "\n\n"
 
 	// Mode indicator and help text
-	if m.mode == moveMode {
+	if m.mode == confirmMode {
+		s += helpStyle.Render(m.confirmPrompt) + "\n\n"
+	} else if m.mode == inputMode {
+		var prompt string
+		if m.inputAction == createGroupAction {
+			prompt = "Create new group:"
+		} else if m.inputAction == renameGroupAction {
+			prompt = "Rename group:"
+		}
+		s += helpStyle.Render(prompt) + "\n"
+		s += m.textInput.View() + "\n"
+		s += helpStyle.Render(keybindStyle.Render("enter")+" submit  "+keybindStyle.Render("esc")+" cancel") + "\n\n"
+	} else if m.mode == moveMode {
 		modeText := modeMoveStyle.Render("MOVE MODE")
 		help := helpStyle.Render(
 			keybindStyle.Render("j/k") + " move item  " +
@@ -277,49 +570,95 @@ func (m model) View() string {
 		s += modeText + " - " + help + "\n\n"
 	} else {
 		modeText := modeNormalStyle.Render("NORMAL")
-		help := helpStyle.Render(
-			keybindStyle.Render("j/k") + " navigate  " +
+		s += modeText
+
+		if m.showKeymap {
+			// Build help text with line wrapping
+			helpLines := []string{}
+			line := keybindStyle.Render("j/k") + " navigate  " +
 				keybindStyle.Render("o") + " attach  " +
 				keybindStyle.Render("d") + " delete  " +
 				keybindStyle.Render("D") + " kill  " +
-				keybindStyle.Render("u") + " update  " +
+				keybindStyle.Render("t") + " toggle deleted  "
+			helpLines = append(helpLines, line)
+
+			line = keybindStyle.Render("u") + " update  " +
 				keybindStyle.Render("p") + " repopulate  " +
 				keybindStyle.Render("m") + " move  " +
-				keybindStyle.Render("s/enter") + " save",
-		)
-		s += modeText + " - " + help + "\n\n"
+				keybindStyle.Render("s/enter") + " save"
+
+			if m.groupsData != nil {
+				if len(m.groupsData.Groups) > 1 {
+					line += "  " + keybindStyle.Render("h/l") + " switch"
+				}
+				helpLines = append(helpLines, line)
+
+				line = ""
+				if len(m.groupsData.Groups) > 1 {
+					line = keybindStyle.Render("H/L") + " move session  "
+				}
+				line += keybindStyle.Render("n") + " new  " +
+					keybindStyle.Render("r") + " rename"
+				if len(m.groupsData.Groups) > 1 {
+					line += "  " + keybindStyle.Render("X") + " delete"
+				}
+				helpLines = append(helpLines, line)
+			} else {
+				helpLines = append(helpLines, line)
+			}
+
+			line = keybindStyle.Render("?") + " toggle help"
+			helpLines = append(helpLines, line)
+
+			helpText := strings.Join(helpLines, "\n")
+			help := helpStyle.Render(helpText)
+			s += "\n" + help
+		} else {
+			help := helpStyle.Render(" " + keybindStyle.Render("?") + " for help")
+			s += help
+		}
+		s += "\n\n"
 	}
 
-	// Session list
-	for i, session := range m.sessions {
-		var line string
-
-		// Cursor indicator
-		cursor := "  "
-		if m.cursor == i {
-			if m.mode == moveMode {
-				cursor = cursorMoveStyle.Render("▶ ")
-			} else {
-				cursor = cursorNormalStyle.Render("› ")
+	// Session list (skip in input/confirm mode)
+	if m.mode != inputMode && m.mode != confirmMode {
+		for i, session := range m.sessions {
+			// Skip deleted sessions if showDeleted is false
+			if !m.showDeleted && session.Deleted {
+				continue
 			}
-		}
 
-		// Session name with styling
-		sessionText := session.Name
-		if session.Deleted {
-			sessionText = sessionDeletedStyle.Render(session.Name)
-		} else if m.cursor == i {
-			sessionText = sessionHighlightStyle.Render(session.Name)
-		} else {
-			sessionText = sessionActiveStyle.Render(session.Name)
-		}
+			var line string
 
-		line = cursor + sessionText
-		s += line + "\n"
+			// Cursor indicator
+			cursor := "  "
+			if m.cursor == i {
+				if m.mode == moveMode {
+					cursor = cursorMoveStyle.Render("▶ ")
+				} else {
+					cursor = cursorNormalStyle.Render("› ")
+				}
+			}
+
+			// Session name with styling
+			sessionText := session.Name
+			if session.Deleted {
+				sessionText = sessionDeletedStyle.Render(session.Name)
+			} else if m.cursor == i {
+				sessionText = sessionHighlightStyle.Render(session.Name)
+			} else {
+				sessionText = sessionActiveStyle.Render(session.Name)
+			}
+
+			line = cursor + sessionText
+			s += line + "\n"
+		}
 	}
 
 	// Footer
-	s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(", ") + keybindStyle.Render("esc") + helpStyle.Render(", or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
+	if m.mode != inputMode && m.mode != confirmMode {
+		s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(", ") + keybindStyle.Render("esc") + helpStyle.Render(", or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
+	}
 
 	return s
 }
@@ -333,17 +672,87 @@ func Run(sessions []storage.SessionData, onSave func([]storage.SessionData) erro
 		config = &storage.Config{WrapAround: false}
 	}
 
-	m := model{
-		sessions:   sessions,
-		cursor:     0,
-		mode:       normalMode,
-		onSave:     onSave,
-		wrapAround: config.WrapAround,
+	// Try to get current tmux session and position cursor on it
+	cursor := 0
+	currentSession, err := tmux.GetCurrentSession()
+	if err == nil {
+		// Find the index of current session in the list
+		for i, session := range sessions {
+			if session.Name == currentSession {
+				cursor = i
+				break
+			}
+		}
 	}
+
+	m := model{
+		sessions:    sessions,
+		cursor:      cursor,
+		mode:        normalMode,
+		onSave:      onSave,
+		wrapAround:  config.WrapAround,
+		groupsData:  nil, // Will be set when we refactor main.go
+		showDeleted: config.ShowDeleted,
+		config:      config,
+	}
+
+	// Ensure cursor starts on a visible session
+	m.ensureCursorOnVisibleSession()
 
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	return nil
+}
+
+// RunWithGroups starts the interactive TUI with group support
+func RunWithGroups(groupsData *storage.GroupsData, onSave func(*storage.GroupsData) error) error {
+	// Load config to get wrap around setting
+	config, err := storage.LoadConfig()
+	if err != nil {
+		config = &storage.Config{WrapAround: false}
+	}
+
+	// Get current group's sessions
+	sessions := groupsData.Groups[groupsData.CurrentGroup].Sessions
+
+	// Try to get current tmux session and position cursor on it
+	cursor := 0
+	currentSession, err := tmux.GetCurrentSession()
+	if err == nil {
+		// Find the index of current session in the list
+		for i, session := range sessions {
+			if session.Name == currentSession {
+				cursor = i
+				break
+			}
+		}
+	}
+
+	m := model{
+		sessions:    sessions,
+		cursor:      cursor,
+		mode:        normalMode,
+		onSave:      nil, // Old callback not used in groups mode
+		wrapAround:  config.WrapAround,
+		groupsData:  groupsData,
+		showDeleted: config.ShowDeleted,
+		config:      config,
+	}
+
+	// Ensure cursor starts on a visible session
+	m.ensureCursorOnVisibleSession()
+
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	// Save groups data after TUI exits
+	if onSave != nil {
+		return onSave(groupsData)
 	}
 
 	return nil
