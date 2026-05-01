@@ -107,3 +107,23 @@ func AttachToSession(sessionName string) error {
 
 	return nil
 }
+
+// GetSessionWorkingDirectory returns the working directory of the specified tmux session
+// It gets the current path of the first pane in the session
+func GetSessionWorkingDirectory(sessionName string) (string, error) {
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", sessionName, "-F", "#{pane_current_path}")
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("failed to get working directory for session '%s': %s", sessionName, string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("failed to get working directory for session '%s': %w", sessionName, err)
+	}
+
+	path := strings.TrimSpace(string(output))
+	if path == "" {
+		return "", fmt.Errorf("no working directory found for session '%s'", sessionName)
+	}
+
+	return path, nil
+}
