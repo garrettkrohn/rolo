@@ -184,6 +184,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Update sessions to show new current group
 					m.sessions = m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions
 					m.cursor = 0
+					// Auto-save after deleting group
+					if m.groupsData != nil {
+						storage.SaveGroupsData(m.groupsData)
+					}
 				}
 				m.mode = normalMode
 				return m, nil
@@ -210,11 +214,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err := storage.CreateGroup(m.groupsData, inputValue); err == nil {
 						// Successfully created group
 						m.mode = normalMode
+						// Auto-save after creating group
+						if m.groupsData != nil {
+							storage.SaveGroupsData(m.groupsData)
+						}
 					}
 					// If error, stay in input mode so user can fix it
 				} else if m.inputAction == renameGroupAction {
 					if err := storage.RenameGroup(m.groupsData, m.groupsData.CurrentGroup, inputValue); err == nil {
 						m.mode = normalMode
+						// Auto-save after renaming group
+						if m.groupsData != nil {
+							storage.SaveGroupsData(m.groupsData)
+						}
 					}
 				}
 				return m, nil
@@ -270,6 +282,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle deleted state for current session
 			if m.cursor < len(m.sessions) {
 				m.sessions[m.cursor].Deleted = !m.sessions[m.cursor].Deleted
+				// Auto-save after toggling delete
+				if m.groupsData != nil {
+					m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+					storage.SaveGroupsData(m.groupsData)
+				} else if m.onSave != nil {
+					m.onSave(m.sessions)
+				}
 			}
 
 		case "D":
@@ -286,6 +305,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 						m.cursor = len(m.sessions) - 1
 					}
+				}
+				// Auto-save after killing session
+				if m.groupsData != nil {
+					m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+					storage.SaveGroupsData(m.groupsData)
+				} else if m.onSave != nil {
+					m.onSave(m.sessions)
 				}
 			}
 
@@ -308,6 +334,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 				m.cursor = len(m.sessions) - 1
+			}
+			// Auto-save after repopulating
+			if m.groupsData != nil {
+				m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+				storage.SaveGroupsData(m.groupsData)
+			} else if m.onSave != nil {
+				m.onSave(m.sessions)
 			}
 
 		case "u":
@@ -346,6 +379,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 				m.cursor = len(m.sessions) - 1
 			}
+			// Auto-save after updating
+			if m.groupsData != nil {
+				m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+				storage.SaveGroupsData(m.groupsData)
+			} else if m.onSave != nil {
+				m.onSave(m.sessions)
+			}
 
 		case "m":
 			// Toggle move mode
@@ -369,6 +409,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.sessions[m.cursor], m.sessions[next] =
 						m.sessions[next], m.sessions[m.cursor]
 					m.cursor = next
+					// Auto-save after moving session
+					if m.groupsData != nil {
+						m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+						storage.SaveGroupsData(m.groupsData)
+					} else if m.onSave != nil {
+						m.onSave(m.sessions)
+					}
 				}
 			}
 
@@ -386,6 +433,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.sessions[m.cursor], m.sessions[prev] =
 						m.sessions[prev], m.sessions[m.cursor]
 					m.cursor = prev
+					// Auto-save after moving session
+					if m.groupsData != nil {
+						m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+						storage.SaveGroupsData(m.groupsData)
+					} else if m.onSave != nil {
+						m.onSave(m.sessions)
+					}
 				}
 			}
 
@@ -455,6 +509,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 						m.cursor = len(m.sessions) - 1
 					}
+					// Auto-save after moving session to another group
+					storage.SaveGroupsData(m.groupsData)
 				}
 			}
 
@@ -468,22 +524,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 						m.cursor = len(m.sessions) - 1
 					}
+					// Auto-save after moving session to another group
+					storage.SaveGroupsData(m.groupsData)
 				}
 			}
 
-		case "enter", "s":
-			// Save and quit
-			if m.groupsData != nil {
-				// Update current group's sessions before saving
-				m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
-				// Save immediately in groups mode
-				storage.SaveGroupsData(m.groupsData)
-			} else if m.onSave != nil {
-				// Legacy mode: use callback
-				if err := m.onSave(m.sessions); err != nil {
-					return m, tea.Quit
-				}
-			}
+		case "enter":
+			// Quit (data is auto-saved)
 			return m, tea.Quit
 		}
 	}
@@ -585,7 +632,7 @@ func (m model) View() string {
 			line = keybindStyle.Render("u") + " update  " +
 				keybindStyle.Render("p") + " repopulate  " +
 				keybindStyle.Render("m") + " move  " +
-				keybindStyle.Render("s/enter") + " save"
+				keybindStyle.Render("enter") + " quit"
 
 			if m.groupsData != nil {
 				if len(m.groupsData.Groups) > 1 {
@@ -657,7 +704,7 @@ func (m model) View() string {
 
 	// Footer
 	if m.mode != inputMode && m.mode != confirmMode {
-		s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(", ") + keybindStyle.Render("esc") + helpStyle.Render(", or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit without saving")
+		s += "\n" + helpStyle.Render("Press ") + keybindStyle.Render("q") + helpStyle.Render(", ") + keybindStyle.Render("esc") + helpStyle.Render(", ") + keybindStyle.Render("enter") + helpStyle.Render(", or ") + keybindStyle.Render("ctrl+c") + helpStyle.Render(" to quit (auto-saved)")
 	}
 
 	return s
