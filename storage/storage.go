@@ -13,10 +13,11 @@ const (
 	DefaultGroupName = "main"
 )
 
-// SessionData represents a session with its deleted state
+// SessionData represents a session with its deleted state and context flag
 type SessionData struct {
-	Name    string `json:"name"`
-	Deleted bool   `json:"deleted"`
+	Name      string `json:"name"`
+	Deleted   bool   `json:"deleted"`
+	InContext bool   `json:"in_context,omitempty"`
 }
 
 // Group represents a named collection of sessions

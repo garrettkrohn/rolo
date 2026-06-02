@@ -149,7 +149,7 @@ func TestNextPrevWithMultipleSessions(t *testing.T) {
 
 	// Act
 	loaded, _ := storage.LoadGroupsData()
-	
+
 	// Count active sessions
 	activeCount := 0
 	for _, s := range loaded.Groups[0].Sessions {
@@ -161,5 +161,67 @@ func TestNextPrevWithMultipleSessions(t *testing.T) {
 	// Assert - should have 2 active sessions (switching is valid)
 	if activeCount != 2 {
 		t.Errorf("Expected 2 active sessions, got %d", activeCount)
+	}
+}
+
+func TestInContextPersistence(t *testing.T) {
+	// Arrange
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	os.Setenv("HOME", tempDir)
+	defer os.Setenv("HOME", originalHome)
+
+	// Create groups data with some sessions
+	data := &storage.GroupsData{
+		Groups: []storage.Group{
+			{
+				Name: "main",
+				Sessions: []storage.SessionData{
+					{Name: "session1", Deleted: false, InContext: false},
+					{Name: "session2", Deleted: false, InContext: true},
+					{Name: "session3", Deleted: false, InContext: false},
+				},
+			},
+		},
+		CurrentGroup: 0,
+	}
+	storage.SaveGroupsData(data)
+
+	// Act - load and modify
+	loaded, err := storage.LoadGroupsData()
+	if err != nil {
+		t.Fatalf("Failed to load groups data: %v", err)
+	}
+
+	// Toggle InContext for first session
+	loaded.Groups[0].Sessions[0].InContext = true
+	storage.SaveGroupsData(loaded)
+
+	// Assert - reload and verify persistence
+	reloaded, err := storage.LoadGroupsData()
+	if err != nil {
+		t.Fatalf("Failed to reload groups data: %v", err)
+	}
+
+	if !reloaded.Groups[0].Sessions[0].InContext {
+		t.Errorf("Expected session1 InContext to be true after toggle")
+	}
+	if !reloaded.Groups[0].Sessions[1].InContext {
+		t.Errorf("Expected session2 InContext to remain true")
+	}
+	if reloaded.Groups[0].Sessions[2].InContext {
+		t.Errorf("Expected session3 InContext to remain false")
+	}
+
+	// Count sessions in context
+	inContextCount := 0
+	for _, s := range reloaded.Groups[0].Sessions {
+		if s.InContext {
+			inContextCount++
+		}
+	}
+
+	if inContextCount != 2 {
+		t.Errorf("Expected 2 sessions in context, got %d", inContextCount)
 	}
 }

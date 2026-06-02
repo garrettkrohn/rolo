@@ -22,6 +22,7 @@ func showUsage() {
 	fmt.Println("  rolo left     - Switch to previous group")
 	fmt.Println("  rolo right    - Switch to next group")
 	fmt.Println("  rolo context  - List working directories of sessions in current group")
+	fmt.Println("  rolo claude   - Launch Claude Code with sessions marked for context")
 	fmt.Println("  rolo help     - Show this help message")
 }
 
@@ -433,6 +434,64 @@ func handleContext() {
 	}
 }
 
+func handleClaude() {
+	// Load groups data
+	groupsData, err := storage.LoadGroupsData()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading groups: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get current group's sessions
+	sessions := groupsData.Groups[groupsData.CurrentGroup].Sessions
+
+	if len(sessions) == 0 {
+		fmt.Fprintf(os.Stderr, "No sessions in current group\n")
+		os.Exit(1)
+	}
+
+	// Collect working directories for sessions marked as InContext
+	var paths []string
+	for _, session := range sessions {
+		// Skip deleted sessions or sessions not in context
+		if session.Deleted || !session.InContext {
+			continue
+		}
+
+		// Get working directory for this session
+		path, err := tmux.GetSessionWorkingDirectory(session.Name)
+		if err != nil {
+			// Session might not exist anymore, skip it
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			continue
+		}
+
+		paths = append(paths, path)
+	}
+
+	if len(paths) == 0 {
+		fmt.Fprintf(os.Stderr, "No sessions marked for context. Use 'c' in rolo TUI to mark sessions.\n")
+		os.Exit(1)
+	}
+
+	// Build claude command with all context directories
+	args := []string{"code"}
+	for _, path := range paths {
+		args = append(args, "--add-dir", path)
+	}
+
+	// Execute claude command
+	cmd := tmux.ExecCommand("claude", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running claude: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runInteractiveMode() {
 	// Migrate old format if needed
 	if err := storage.MigrateToGroupsFormat(); err != nil {
@@ -478,6 +537,9 @@ func main() {
 			return
 		case "context":
 			handleContext()
+			return
+		case "claude":
+			handleClaude()
 			return
 		case "help", "-h", "--help":
 			showUsage()

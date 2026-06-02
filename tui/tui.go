@@ -267,6 +267,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle keymap visibility
 			m.showKeymap = !m.showKeymap
 
+		case "c":
+			// Toggle in-context flag for current session
+			if m.cursor < len(m.sessions) {
+				m.sessions[m.cursor].InContext = !m.sessions[m.cursor].InContext
+				// Auto-save after toggling context
+				if m.groupsData != nil {
+					m.groupsData.Groups[m.groupsData.CurrentGroup].Sessions = m.sessions
+					storage.SaveGroupsData(m.groupsData)
+				} else if m.onSave != nil {
+					m.onSave(m.sessions)
+				}
+			}
+
 		case "t":
 			// Toggle showing deleted sessions
 			m.showDeleted = !m.showDeleted
@@ -624,6 +637,7 @@ func (m model) View() string {
 			helpLines := []string{}
 			line := keybindStyle.Render("j/k") + " navigate  " +
 				keybindStyle.Render("o") + " attach  " +
+				keybindStyle.Render("c") + " context  " +
 				keybindStyle.Render("d") + " delete  " +
 				keybindStyle.Render("D") + " kill  " +
 				keybindStyle.Render("t") + " toggle deleted  "
@@ -689,12 +703,19 @@ func (m model) View() string {
 
 			// Session name with styling
 			sessionText := session.Name
+
+			// Add context indicator
+			contextIndicator := ""
+			if session.InContext {
+				contextIndicator = "* "
+			}
+
 			if session.Deleted {
-				sessionText = sessionDeletedStyle.Render(session.Name)
+				sessionText = sessionDeletedStyle.Render(contextIndicator + session.Name)
 			} else if m.cursor == i {
-				sessionText = sessionHighlightStyle.Render(session.Name)
+				sessionText = sessionHighlightStyle.Render(contextIndicator + session.Name)
 			} else {
-				sessionText = sessionActiveStyle.Render(session.Name)
+				sessionText = sessionActiveStyle.Render(contextIndicator + session.Name)
 			}
 
 			line = cursor + sessionText

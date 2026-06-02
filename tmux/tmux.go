@@ -127,3 +127,9 @@ func GetSessionWorkingDirectory(sessionName string) (string, error) {
 
 	return path, nil
 }
+
+// ExecCommand creates a new command with the given name and arguments
+// This is a wrapper around exec.Command for external commands (not tmux commands)
+func ExecCommand(name string, args ...string) *exec.Cmd {
+	return exec.Command(name, args...)
+}

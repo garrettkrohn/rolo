@@ -101,6 +101,7 @@ bind-key l run-shell "rolo right"
 #### Session Navigation (Up/Down)
 - `j/k` - Navigate up/down through sessions
 - `o` - Attach to session
+- `c` - Toggle session in Claude context (marked with `*`)
 - `d` - Toggle delete/hide session
 - `D` - Kill tmux session (permanent deletion)
 - `t` - Toggle visibility of deleted sessions
@@ -128,6 +129,13 @@ bind-key l run-shell "rolo right"
 - `j/k` - Move item up/down within current group
 - `m` - Return to normal mode
 - `s/Enter` - Save and quit
+
+### Visual Indicators
+
+In the TUI, sessions have different visual indicators:
+- `* session-name` - Session is marked for Claude Code context
+- `session-name` - Normal active session
+- `~~session-name~~` - Deleted/hidden session (when `t` is toggled on)
 
 ## Configuration
 
@@ -183,6 +191,7 @@ If you're upgrading from an older version of Rolo:
 ### Management
 - `rolo populate` - Fetch and save all active tmux sessions to current group
 - `rolo context` - List working directories of sessions in current group
+- `rolo claude` - Launch Claude Code with sessions marked for context
 - `rolo help` - Show help message
 
 ## Advanced Usage
@@ -233,18 +242,35 @@ rolo next
 
 ## Claude Code Integration
 
-You can use `rolo context` to add all session working directories from your current group to Claude Code's context:
+Rolo provides seamless integration with Claude Code, allowing you to launch Claude with specific session directories as context.
+
+### Marking Sessions for Context
+
+1. Open the rolo TUI: `rolo`
+2. Navigate to a session you want to include in Claude's context
+3. Press `c` to toggle the context flag (sessions in context are marked with `*`)
+4. Repeat for all sessions you want to include
+
+### Launching Claude with Context
+
+Once you've marked your sessions, run:
+
+```bash
+rolo claude
+```
+
+This will launch Claude Code with all marked session directories added to the context using the `--add-dir` flag.
+
+### Listing Context Directories
+
+You can also list all working directories in your current group:
 
 ```bash
 # List working directories for current group
 rolo context
-
-# Example: Add all directories to Claude Code context
-# (This assumes you have a way to pass directories to Claude)
-rolo context | xargs -I {} echo "Adding: {}"
 ```
 
-This is useful when you want Claude to have context about all the projects/directories you're working on in a particular group.
+This is useful for scripting or debugging which directories are available in your current group.
 
 ### Data Format
 
