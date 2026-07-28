@@ -302,6 +302,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if m.onSave != nil {
 					m.onSave(m.sessions)
 				}
+				// Move cursor to next visible session if current one is now hidden
+				m.ensureCursorOnVisibleSession()
 			}
 
 		case "D":
